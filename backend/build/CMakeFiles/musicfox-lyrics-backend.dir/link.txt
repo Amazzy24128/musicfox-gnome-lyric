@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG "CMakeFiles/musicfox-lyrics-backend.dir/src/main.cpp.o" "CMakeFiles/musicfox-lyrics-backend.dir/src/lyric_fetcher.cpp.o" "CMakeFiles/musicfox-lyrics-backend.dir/src/dbus_client.cpp.o" -o musicfox-lyrics-backend  -lglib-2.0 -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgio-2.0 -lgobject-2.0 

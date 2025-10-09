@@ -1,0 +1,7 @@
+/home/amz/musicfox-gnome-extension/build/CMakeFiles/musicfox-lyrics-backend.dir
+/home/amz/musicfox-gnome-extension/build/CMakeFiles/edit_cache.dir
+/home/amz/musicfox-gnome-extension/build/CMakeFiles/rebuild_cache.dir
+/home/amz/musicfox-gnome-extension/build/CMakeFiles/list_install_components.dir
+/home/amz/musicfox-gnome-extension/build/CMakeFiles/install.dir
+/home/amz/musicfox-gnome-extension/build/CMakeFiles/install/local.dir
+/home/amz/musicfox-gnome-extension/build/CMakeFiles/install/strip.dir

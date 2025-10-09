@@ -1,0 +1,41 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"iterator": "cpp",
+			"__node_handle": "cpp",
+			"optional": "cpp",
+			"ratio": "cpp",
+			"system_error": "cpp",
+			"array": "cpp",
+			"functional": "cpp",
+			"tuple": "cpp",
+			"type_traits": "cpp",
+			"utility": "cpp",
+			"variant": "cpp",
+			"charconv": "cpp",
+			"chrono": "cpp",
+			"format": "cpp",
+			"__bit_reference": "cpp",
+			"__functional_base": "cpp",
+			"algorithm": "cpp",
+			"bitset": "cpp",
+			"deque": "cpp",
+			"__memory": "cpp",
+			"limits": "cpp",
+			"locale": "cpp",
+			"memory": "cpp",
+			"random": "cpp",
+			"vector": "cpp",
+			"istream": "cpp",
+			"mutex": "cpp",
+			"ostream": "cpp",
+			"stop_token": "cpp",
+			"typeinfo": "cpp"
+		}
+	}
+}
