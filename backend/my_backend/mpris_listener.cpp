@@ -22,6 +22,33 @@ typedef struct
     int position;                // 当前播放位置，单位秒
     bool is_playing;             // 是否正在播放
 } music_t;
+// helper: 将 unix 秒转换为 RFC3339（含本地时区偏移）字符串
+static std::string format_rfc3339_from_unix_seconds(gint64 seconds) {
+    time_t t = static_cast<time_t>(seconds);
+    struct tm loc_tm;
+    localtime_r(&t, &loc_tm);
+    char datetime[64];
+    strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &loc_tm);
+
+    struct tm gmt_tm;
+    gmtime_r(&t, &gmt_tm);
+
+    time_t lt = mktime(&loc_tm);
+    time_t gt = mktime(&gmt_tm);
+    long offset = static_cast<long>(difftime(lt, gt)); // seconds east of UTC
+
+    if (offset == 0) {
+        return std::string(datetime) + "Z";
+    } else {
+        char sign = offset >= 0 ? '+' : '-';
+        long absoff = std::labs(offset);
+        int hh = static_cast<int>(absoff / 3600);
+        int mm = static_cast<int>((absoff % 3600) / 60);
+        char tz[8];
+        snprintf(tz, sizeof(tz), "%c%02d:%02d", sign, hh, mm);
+        return std::string(datetime) + tz;
+    }
+}
 
 // 查找 musicfox 的 MPRIS D-Bus 名称
 std::string find_musicfox_bus_name()
@@ -233,7 +260,12 @@ void display_music(const music_t &music)
     
 }
 
-// 统一信号处理函数，打印所有信号内容
+// 将全局缓存与同步控制的定义移动到这里，确保 on_any_signal 可以访问它们
+static music_t g_current_music = {};       // 全局当前音乐信息缓存
+static std::mutex g_music_mutex;           // 保护 g_current_music 的互斥锁
+static std::atomic<bool> g_stop_reader{false}; // 停止后台读取线程的标志
+
+// 统一信号处理函数，打印并处理 PropertiesChanged 信号内容
 extern "C" void on_any_signal(
     GDBusConnection *connection,
     const gchar *sender_name,
@@ -243,23 +275,149 @@ extern "C" void on_any_signal(
     GVariant *parameters,
     gpointer user_data)
 {
-    // std::cout << "==== Signal received ====" << std::endl;
-    // std::cout << "Sender: " << (sender_name ? sender_name : "(null)") << std::endl;
-    // std::cout << "ObjectPath: " << (object_path ? object_path : "(null)") << std::endl;
-    // std::cout << "Interface: " << (interface_name ? interface_name : "(null)") << std::endl;
-    // std::cout << "SignalName: " << (signal_name ? signal_name : "(null)") << std::endl;
-    // // 打印参数（GVariant的字符串表示）
-    // gchar *param_str = g_variant_print(parameters, TRUE);
-    // std::cout << "Parameters: " << (param_str ? param_str : "(null)") << std::endl;
-    // g_free(param_str);
-    // std::cout << "========================" << std::endl
-    //           << std::endl;
-}
+    // 解析 PropertiesChanged 的 parameters: (s a{sv} as)
+    if (!parameters)
+        return;
 
-// 全局缓存与同步控制，用于后台线程写入并主线程/其它消费者读取
-static music_t g_current_music = {};       // 全局当前音乐信息缓存
-static std::mutex g_music_mutex;           // 保护 g_current_music 的互斥锁
-static std::atomic<bool> g_stop_reader{false}; // 停止后台读取线程的标志
+    const char *iface = nullptr;
+    GVariant *changed_props = nullptr;
+    GVariant *invalidated = nullptr;
+
+    // 获取参数：接口名（s）、changed props（a{sv}，作为 GVariant*）、invalidated array（as）
+    g_variant_get(parameters, "(&s@a{sv}@as)", &iface, &changed_props, &invalidated);
+
+    // 遍历 changed_props 字典 a{sv}
+    GVariantIter iter;
+    gchar *prop_name = nullptr;
+    GVariant *prop_value = nullptr;
+
+    g_variant_iter_init(&iter, changed_props);
+    while (g_variant_iter_next(&iter, "{sv}", &prop_name, &prop_value))
+    {
+        // 只处理 Player 接口的属性变化（可选）
+        // if (iface && strcmp(iface, "org.mpris.MediaPlayer2.Player") != 0) { ... }
+
+        // 保护全局状态写入
+        {
+            std::lock_guard<std::mutex> lk(g_music_mutex);
+
+            // 新增：处理播放状态变化（Playing / Paused / Stopped）
+            if (g_strcmp0(prop_name, "PlaybackStatus") == 0)
+            {
+                if (g_variant_is_of_type(prop_value, G_VARIANT_TYPE_STRING))
+                {
+                    const char *status = g_variant_get_string(prop_value, nullptr);
+                    // Playing -> true，Paused/Stopped -> false
+                    g_current_music.is_playing = (strcmp(status, "Playing") == 0);
+                }
+            }
+            
+            if (g_strcmp0(prop_name, "xesam:lastPlayed") == 0) // 播放开始时间 
+            {
+                // 支持多种类型：字符串（ISO8601/RFC3339）、int64/uint64（microseconds since epoch）、double（秒）
+                if (g_variant_is_of_type(prop_value, G_VARIANT_TYPE_STRING)) {
+                    g_current_music.started_time = g_variant_get_string(prop_value, nullptr);
+                } else if (g_variant_is_of_type(prop_value, G_VARIANT_TYPE_INT64)) {
+                    gint64 us = g_variant_get_int64(prop_value);
+                    g_current_music.started_time = format_rfc3339_from_unix_seconds(us / 1000000);
+                } else if (g_variant_is_of_type(prop_value, G_VARIANT_TYPE_UINT64)) {
+                    guint64 us = g_variant_get_uint64(prop_value);
+                    g_current_music.started_time = format_rfc3339_from_unix_seconds(static_cast<gint64>(us / 1000000));
+                } else if (g_variant_is_of_type(prop_value, G_VARIANT_TYPE_DOUBLE)) {
+                    double secs = g_variant_get_double(prop_value);
+                    g_current_music.started_time = format_rfc3339_from_unix_seconds(static_cast<gint64>(secs));
+                } else {
+                    // 回退：把任意值打印为字符串保存，便于调试
+                    gchar *valstr = g_variant_print(prop_value, TRUE);
+                    if (valstr) {
+                        g_current_music.started_time = valstr;
+                        g_free(valstr);
+                    }
+                }
+            }
+            else if (g_strcmp0(prop_name, "Metadata") == 0)
+            {
+                // prop_value 的类型通常是 a{sv}（字典）
+                if (g_variant_is_of_type(prop_value, G_VARIANT_TYPE("a{sv}")))
+                {
+                    GVariantIter miter;
+                    gchar *mkey = nullptr;
+                    GVariant *mval = nullptr;
+                    g_variant_iter_init(&miter, prop_value);
+                    while (g_variant_iter_next(&miter, "{sv}", &mkey, &mval))
+                    {
+                        if (g_strcmp0(mkey, "xesam:title") == 0)
+                        {
+                            if (g_variant_is_of_type(mval, G_VARIANT_TYPE_STRING))
+                                g_current_music.title = g_variant_get_string(mval, nullptr);
+                        }
+                        else if (g_strcmp0(mkey, "xesam:artist") == 0)
+                        {
+                            // 通常为字符串数组 (as)，取第一个
+                            if (g_variant_is_of_type(mval, G_VARIANT_TYPE("as")))
+                            {
+                                GVariantIter aiter;
+                                gchar *artist_name = nullptr;
+                                g_variant_iter_init(&aiter, mval);
+                                if (g_variant_iter_next(&aiter, "s", &artist_name))
+                                {
+                                    g_current_music.artist = artist_name;
+                                    g_free(artist_name);
+                                }
+                            }
+                            else if (g_variant_is_of_type(mval, G_VARIANT_TYPE_STRING))
+                            {
+                                g_current_music.artist = g_variant_get_string(mval, nullptr);
+                            }
+                        }
+                        else if (g_strcmp0(mkey, "xesam:asText") == 0)
+                        {
+                            if (g_variant_is_of_type(mval, G_VARIANT_TYPE_STRING))
+                                g_current_music.instance_lyrics = g_variant_get_string(mval, nullptr);
+                        }
+                        else if (g_strcmp0(mkey, "mpris:length") == 0 || g_strcmp0(mkey, "length") == 0)
+                        {
+                            if (g_variant_is_of_type(mval, G_VARIANT_TYPE_INT64))
+                            {
+                                gint64 us = g_variant_get_int64(mval);
+                                g_current_music.duration = static_cast<int>(us / 1000000);
+                            }
+                            else if (g_variant_is_of_type(mval, G_VARIANT_TYPE_INT32))
+                            {
+                                g_current_music.duration = g_variant_get_int32(mval);
+                            }
+                        }
+
+                        g_free(mkey);
+                        g_variant_unref(mval);
+                    } // end metadata inner loop
+                } // end if metadata type check
+            }
+            else if (g_strcmp0(prop_name, "Volume") == 0)
+            {
+                // 示例：可以处理音量变化（可选）
+                // if (g_variant_is_of_type(prop_value, G_VARIANT_TYPE_DOUBLE))
+                // {
+                //     double vol = g_variant_get_double(prop_value);
+                // }
+            }
+            // 其它属性可按需处理
+        } // unlock mutex
+        display_music(g_current_music); // 每次属性变化后打印当前音乐信息（可选）
+        g_free(prop_name);
+        g_variant_unref(prop_value);
+    }
+
+    // 释放从 g_variant_get 得到的引用
+    if (changed_props)
+        g_variant_unref(changed_props);
+    if (invalidated)
+        g_variant_unref(invalidated);
+}
+// // 全局缓存与同步控制，用于后台线程写入并主线程/其它消费者读取
+// static music_t g_current_music = {};       // 全局当前音乐信息缓存
+// static std::mutex g_music_mutex;           // 保护 g_current_music 的互斥锁
+// static std::atomic<bool> g_stop_reader{false}; // 停止后台读取线程的标志
 
 // 后台读取函数：在独立线程中周期性同步读取 metadata 并更新全局缓存
 static void background_reader(GDBusConnection *connection, const std::string &bus_name, int interval_ms = 1000)
@@ -267,6 +425,7 @@ static void background_reader(GDBusConnection *connection, const std::string &bu
     static int cnt = 0;
     while (!g_stop_reader.load(std::memory_order_relaxed))
     {
+        
         // 同步读取当前音乐信息
         music_t music = read_music(connection, bus_name);
 
@@ -275,8 +434,8 @@ static void background_reader(GDBusConnection *connection, const std::string &bu
             std::lock_guard<std::mutex> lk(g_music_mutex);
             g_current_music = music;
             cnt ++ ;
-            std::cout << "Background read count: " << cnt << std::endl;
-            display_music(g_current_music);
+            // std::cout << "Background read count: " << cnt << std::endl;
+            // display_music(g_current_music);
         }
         
         // 睡眠一段时间，下次再读取（间隔可调整）
@@ -284,41 +443,15 @@ static void background_reader(GDBusConnection *connection, const std::string &bu
     }
 }
 
-// helper: 将 unix 秒转换为 RFC3339（含本地时区偏移）字符串
-static std::string format_rfc3339_from_unix_seconds(gint64 seconds) {
-    time_t t = static_cast<time_t>(seconds);
-    struct tm loc_tm;
-    localtime_r(&t, &loc_tm);
-    char datetime[64];
-    strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &loc_tm);
-
-    struct tm gmt_tm;
-    gmtime_r(&t, &gmt_tm);
-
-    time_t lt = mktime(&loc_tm);
-    time_t gt = mktime(&gmt_tm);
-    long offset = static_cast<long>(difftime(lt, gt)); // seconds east of UTC
-
-    if (offset == 0) {
-        return std::string(datetime) + "Z";
-    } else {
-        char sign = offset >= 0 ? '+' : '-';
-        long absoff = std::labs(offset);
-        int hh = static_cast<int>(absoff / 3600);
-        int mm = static_cast<int>((absoff % 3600) / 60);
-        char tz[8];
-        snprintf(tz, sizeof(tz), "%c%02d:%02d", sign, hh, mm);
-        return std::string(datetime) + tz;
-    }
-}
 
 int main()
 {
-    std::string bus_name = find_musicfox_bus_name();
-    if (bus_name.empty())
+    std::cout << "MPRIS Listener started. Waiting musicfox start..." << std::endl;
+    // 一直等待musicfox挂载，直到找到musicfox
+    std::string bus_name = "";
+    while (bus_name.empty())
     {
-        std::cerr << "No musicfox MPRIS service found." << std::endl;
-        return 1;
+        bus_name = find_musicfox_bus_name();
     }
     GError *error = nullptr;
     GDBusConnection *connection = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
@@ -343,7 +476,7 @@ int main()
         nullptr,
         nullptr);
 
-    std::cout << "Listening for ALL musicfox MPRIS signals..." << std::endl;
+    std::cout << "musicfox strated , Listening for ALL musicfox MPRIS signals..." << std::endl;
 
     // 启动后台读取线程：定期同步读取歌曲数据并更新全局缓存
     std::thread reader_thread(background_reader, connection, bus_name, 1000 /*ms*/);
