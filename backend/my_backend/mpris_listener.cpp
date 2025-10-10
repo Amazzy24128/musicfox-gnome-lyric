@@ -5,12 +5,19 @@
 #include <mutex>     // 新增：用于保护 shared data
 #include <atomic>    // 新增：停止标志
 #include <chrono>    // 新增：用于 sleep
+#include <ctime>
+#include <sstream>
+#include <iomanip>
+
+// 新增：在 read_music 使用之前声明 helper 函数，避免未声明错误
+static std::string format_rfc3339_from_unix_seconds(gint64 seconds);
 
 typedef struct
 {
     std::string artist;
     std::string title;
     std::string instance_lyrics; // 现在的歌词
+    std::string started_time;       // 开始时间
     int duration;                // 歌曲总时长，单位秒
     int position;                // 当前播放位置，单位秒
     bool is_playing;             // 是否正在播放
@@ -147,27 +154,61 @@ music_t read_music(GDBusConnection *connection, const std::string &bus_name)
                     music.instance_lyrics = g_variant_get_string(value, nullptr);
                 }
             }
-            else if (g_strcmp0(key, "mpris:position") == 0 || g_strcmp0(key, "position") == 0) // 当前播放位置
-            {
-                // mpris:position 通常为 microseconds（int64）
-                if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT64))
-                {
-                    gint64 us = g_variant_get_int64(value);
-                    music.position = static_cast<int>(us / 1000000); // 转换为秒
-                }
-                else if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT32))
-                {
-                    music.position = g_variant_get_int32(value);
-                }
-            }
-            else if (g_strcmp0(key, "PlaybackStatus") == 0) // 播放状态
-            {
-                if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))
-                {
-                    const char *status = g_variant_get_string(value, nullptr);
-                    music.is_playing = (strcmp(status, "Playing") == 0);
-                }
-            }
+            // 下面三个量似乎得从被动接收的 signal 里获取
+            // else if (g_strcmp0(key, "mpris:position") == 0 || g_strcmp0(key, "position") == 0) // 当前播放位置
+            // {
+            //     // mpris:position 通常为 microseconds（int64）
+            //     if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT64))
+            //     {
+            //         gint64 us = g_variant_get_int64(value);
+            //         music.position = static_cast<int>(us / 1000000); // 转换为秒
+            //     }
+            //     else if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT32))
+            //     {
+            //         music.position = g_variant_get_int32(value);
+            //     }
+            // }
+            // else if (g_strcmp0(key, "PlaybackStatus") == 0) // 播放状态
+            // {
+            //     if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))
+            //     {
+            //         const char *status = g_variant_get_string(value, nullptr);
+            //         music.is_playing = (strcmp(status, "Playing") == 0);
+            //     }
+            // }
+            // else if (g_strcmp0(key, "xesam:lastPlayed") == 0) // 开始时间（兼容多种类型）
+            // {
+            //     // 调试：打印类型和值，帮助确认 metadata 实际内容（可在调试完成后移除）
+            //     {
+            //         gchar *valstr = g_variant_print(value, TRUE);
+            //         std::cerr << "DEBUG: key=" << key << " type=" << g_variant_get_type_string(value)
+            //                   << " value=" << (valstr ? valstr : "(null)") << std::endl;
+            //         if (valstr) g_free(valstr);
+            //     }
+
+            //     // 可能的情况：
+            //     // - 字符串：直接作为 ISO8601/RFC3339 字符串使用
+            //     // - int64/uint64：常见为 microseconds since epoch -> 转为 RFC3339
+            //     if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)) {
+            //         music.started_time = g_variant_get_string(value, nullptr);
+            //     }
+            //     else if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) {
+            //         gint64 us = g_variant_get_int64(value);
+            //         music.started_time = format_rfc3339_from_unix_seconds(us / 1000000);
+            //     }
+            //     else if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT64)) {
+            //         guint64 us = g_variant_get_uint64(value);
+            //         music.started_time = format_rfc3339_from_unix_seconds(static_cast<gint64>(us / 1000000));
+            //     }
+            //     else {
+            //         // 未知类型：将其打印为字符串备用
+            //         gchar *valstr = g_variant_print(value, TRUE);
+            //         if (valstr) {
+            //             music.started_time = valstr;
+            //             g_free(valstr);
+            //         }
+            //     }
+            // }
 
             g_free(key);            // 释放 g_variant_iter_next 分配的 key
             g_variant_unref(value); // 释放 value
@@ -188,6 +229,8 @@ void display_music(const music_t &music)
     std::cout << "Position: " << music.position << " seconds" << std::endl;
     std::cout << "Is Playing: " << (music.is_playing ? "Yes" : "No") << std::endl;
     std::cout << "Lyrics: " << music.instance_lyrics << std::endl;
+    std::cout << "Started Time: " << music.started_time << std::endl;
+    
 }
 
 // 统一信号处理函数，打印所有信号内容
@@ -238,6 +281,34 @@ static void background_reader(GDBusConnection *connection, const std::string &bu
         
         // 睡眠一段时间，下次再读取（间隔可调整）
         std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
+    }
+}
+
+// helper: 将 unix 秒转换为 RFC3339（含本地时区偏移）字符串
+static std::string format_rfc3339_from_unix_seconds(gint64 seconds) {
+    time_t t = static_cast<time_t>(seconds);
+    struct tm loc_tm;
+    localtime_r(&t, &loc_tm);
+    char datetime[64];
+    strftime(datetime, sizeof(datetime), "%Y-%m-%dT%H:%M:%S", &loc_tm);
+
+    struct tm gmt_tm;
+    gmtime_r(&t, &gmt_tm);
+
+    time_t lt = mktime(&loc_tm);
+    time_t gt = mktime(&gmt_tm);
+    long offset = static_cast<long>(difftime(lt, gt)); // seconds east of UTC
+
+    if (offset == 0) {
+        return std::string(datetime) + "Z";
+    } else {
+        char sign = offset >= 0 ? '+' : '-';
+        long absoff = std::labs(offset);
+        int hh = static_cast<int>(absoff / 3600);
+        int mm = static_cast<int>((absoff % 3600) / 60);
+        char tz[8];
+        snprintf(tz, sizeof(tz), "%c%02d:%02d", sign, hh, mm);
+        return std::string(datetime) + tz;
     }
 }
 
