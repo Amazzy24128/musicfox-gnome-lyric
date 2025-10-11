@@ -1,0 +1,35 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <!-- 
+    这是你的 D-Bus 接口定义。
+    前端 JS 将通过这个接口与你的后端通信。
+  -->
+  <interface name="org.amazzy24128.MusicInfoService.Player">
+
+    <!-- 属性 (Properties): 前端可以随时读取的数据 -->
+
+    <property name="Artist" type="s" access="read"/>
+    <property name="Title" type="s" access="read"/>
+    <property name="IsPlaying" type="b" access="read"/>
+    <property name="CurrentLyric" type="s" access="read"/>
+    <!-- 使用 double 类型的秒，方便前端计算 -->
+    <property name="Duration" type="d" access="read"/> 
+    <property name="Position" type="d" access="read"/>
+
+    <!-- 
+      信号 (Signal): 当任何状态改变时，后端会发出这个信号通知前端。
+      前端只需要监听这一个信号即可更新所有 UI。
+      信号会把所有最新的属性值一次性发给前端，非常高效。
+    -->
+    <signal name="StateChanged">
+      <arg name="artist" type="s"/>
+      <arg name="title" type="s"/>
+      <arg name="is_playing" type="b"/>
+      <arg name="current_lyric" type="s"/>
+      <arg name="duration" type="d"/>
+      <arg name="position" type="d"/>
+    </signal>
+
+  </interface>
+</node>

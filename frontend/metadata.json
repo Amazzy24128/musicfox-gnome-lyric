@@ -1,0 +1,8 @@
+{
+    "name": "Musicfox Lyric Display",
+    "description": "Displays lyrics and song info from the Musicfox player in the top bar.",
+    "uuid": "musicfox-lyric@amazzy24128",
+    "shell-version": [ "46" ],
+    "url": "https://github.com/Amazzy24128",
+    "version": 2
+}
