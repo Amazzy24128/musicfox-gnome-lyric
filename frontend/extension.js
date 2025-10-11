@@ -82,7 +82,7 @@ export default class MusicfoxLyricExtension extends Extension {
         if (!this._label) return;
         let displayText = lyric || `${artist} - ${title}`;
         if (!artist && !title) { displayText = 'Musicfox Lyric'; }
-        const icon = isPlaying ? '▶' : '❚❚';
+        const icon = isPlaying ? '❚❚' : '▶';
         this._label.set_text(`${icon} ${displayText}`);
     }
 
