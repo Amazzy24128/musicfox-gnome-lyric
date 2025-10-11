@@ -6,10 +6,11 @@
 #include <algorithm>
 #include <chrono>
 #include <unistd.h>
+#include <sstream> // 确保包含 sstream
 
 #include "music-info-service-generated.h"
 
-// --- 数据结构、全局变量、函数声明 (与之前相同) ---
+// --- 数据结构、全局变量 (与之前相同) ---
 struct LyricLine { gint64 timestamp_us; std::string text; };
 typedef struct { std::string trackid; std::string artist; std::string title; gint64 duration_us; bool is_playing; } music_t;
 typedef struct { GDBusConnection *connection; std::string bus_name; } AppContext;
@@ -22,14 +23,14 @@ static gint64 g_last_sync_position_us = 0;
 static MusicInfoServicePlayer *g_player_skeleton = nullptr;
 static GDBusObjectManagerServer *g_object_manager = nullptr;
 
+// --- 函数声明 (与之前相同) ---
 static std::vector<LyricLine> parse_lrc(const std::string &lrc_text);
 static void update_and_emit_signal(gint64 display_position_us);
 static gboolean sync_position_from_dbus(gpointer user_data);
 static gboolean predictive_update(gpointer user_data);
 std::string find_musicfox_bus_name();
 
-// (所有辅助函数和回调函数与之前版本完全相同, 为简洁省略)
-// ... 它们在这里 ...
+// (find_musicfox_bus_name, parse_lrc, update_and_emit_signal 函数与之前版本完全相同, 为简洁省略)
 std::string find_musicfox_bus_name() {
     GError *error = nullptr; GDBusConnection *connection = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
     if (!connection) { return ""; }
@@ -68,38 +69,77 @@ void update_and_emit_signal(gint64 display_position_us) {
     music_info_service_player_set_position(g_player_skeleton, static_cast<double>(display_position_us) / 1000000.0);
     music_info_service_player_emit_state_changed(g_player_skeleton, g_current_music.artist.c_str(), g_current_music.title.c_str(), g_current_music.is_playing, g_current_lyric_text.c_str(), static_cast<double>(g_current_music.duration_us) / 1000000.0, static_cast<double>(display_position_us) / 1000000.0);
 }
+
+
+// --- 关键修正：移植自 mpris_listener.cpp 的健壮逻辑 ---
 extern "C" void on_any_signal(GDBusConnection *connection, const gchar *sender, const gchar *path, const gchar *iface_name, const gchar *signal, GVariant *params, gpointer data) {
-    music_t temp_music = g_current_music; std::vector<LyricLine> temp_lyrics = g_parsed_lyrics;
-    const char *prop_iface = nullptr; GVariant *changed_props = nullptr;
+    if (g_strcmp0(signal, "PropertiesChanged") != 0 || !params) return;
+
+    const char *prop_iface = nullptr;
+    GVariant *changed_props = nullptr;
     g_variant_get(params, "(&s@a{sv}@as)", &prop_iface, &changed_props, nullptr);
+
+    // 1. 创建全新的、干净的临时变量
+    music_t temp_music = {};
+    std::vector<LyricLine> temp_lyrics;
+
+    // 2. 用信号中的新数据填充临时变量
     GVariant *status_variant = g_variant_lookup_value(changed_props, "PlaybackStatus", G_VARIANT_TYPE_STRING);
-    if (status_variant) { temp_music.is_playing = (g_strcmp0(g_variant_get_string(status_variant, nullptr), "Playing") == 0); g_variant_unref(status_variant); } 
+    if (status_variant) {
+        temp_music.is_playing = (g_strcmp0(g_variant_get_string(status_variant, nullptr), "Playing") == 0);
+        g_variant_unref(status_variant);
+    } else {
+        temp_music.is_playing = g_current_music.is_playing; // 如果信号没给，继承旧值
+    }
+
     GVariant *meta_variant = g_variant_lookup_value(changed_props, "Metadata", G_VARIANT_TYPE("a{sv}"));
     if (meta_variant) {
-        GVariantIter miter; gchar *mkey; GVariant *mval; g_variant_iter_init(&miter, meta_variant);
+        GVariantIter miter; gchar *mkey; GVariant *mval;
+        g_variant_iter_init(&miter, meta_variant);
         while (g_variant_iter_next(&miter, "{sv}", &mkey, &mval)) {
             if (g_strcmp0(mkey, "mpris:trackid") == 0) temp_music.trackid = g_variant_get_string(mval, nullptr);
             else if (g_strcmp0(mkey, "xesam:title") == 0) temp_music.title = g_variant_get_string(mval, nullptr);
             else if (g_strcmp0(mkey, "xesam:artist") == 0 && g_variant_is_of_type(mval, G_VARIANT_TYPE("as")) && g_variant_n_children(mval) > 0) temp_music.artist = g_variant_get_string(g_variant_get_child_value(mval, 0), nullptr);
             else if (g_strcmp0(mkey, "mpris:length") == 0) temp_music.duration_us = g_variant_get_int64(mval);
-            else if (g_strcmp0(mkey, "xesam:asText") == 0) { const char* lrc = g_variant_get_string(mval, nullptr); if (lrc) temp_lyrics = parse_lrc(lrc); }
+            else if (g_strcmp0(mkey, "xesam:asText") == 0) {
+                const char* lrc = g_variant_get_string(mval, nullptr);
+                if (lrc) temp_lyrics = parse_lrc(lrc);
+            }
             g_free(mkey); g_variant_unref(mval);
         }
         g_variant_unref(meta_variant);
+    } else {
+        // 如果信号没给元数据，继承旧的元数据和歌词
+        temp_music.trackid = g_current_music.trackid;
+        temp_music.artist = g_current_music.artist;
+        temp_music.title = g_current_music.title;
+        temp_music.duration_us = g_current_music.duration_us;
+        temp_lyrics = g_parsed_lyrics;
     }
-    bool is_new_track = (temp_music.trackid != "" && temp_music.trackid != g_current_music.trackid);
-    bool playback_state_changed = temp_music.is_playing != g_current_music.is_playing;
-    if(is_new_track) {
-        g_current_music = temp_music;
-        g_parsed_lyrics = temp_lyrics;
+
+    // 3. 判断是否是新歌
+    bool is_new_track = (!temp_music.trackid.empty() && temp_music.trackid != g_current_music.trackid);
+
+    // 4. 无条件用临时数据整体覆盖全局数据，保证状态原子性更新
+    g_current_music = temp_music;
+    g_parsed_lyrics = temp_lyrics;
+
+    // 5. 如果是新歌，重置当前歌词文本并立即同步时间
+    if (is_new_track) {
         g_current_lyric_text = "";
         sync_position_from_dbus(data);
-    } else if (playback_state_changed) {
-        g_current_music.is_playing = temp_music.is_playing;
-        sync_position_from_dbus(data);
+    } else {
+        // 如果不是新歌，但播放状态变了（例如从暂停到播放），也同步一次时间
+        bool playback_state_changed = temp_music.is_playing != g_current_music.is_playing;
+        if(playback_state_changed) {
+             sync_position_from_dbus(data);
+        }
     }
+    
     if (changed_props) g_variant_unref(changed_props);
 }
+
+
 static gboolean sync_position_from_dbus(gpointer user_data) {
     AppContext* context = static_cast<AppContext*>(user_data);
     GError *error = nullptr;
@@ -159,35 +199,20 @@ int main()
     AppContext context = { connection, mpris_bus_name };
     GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
 
-    // --- 最终修正：使用兼容旧版本 GLib 的、正确的层级结构 ---
-
     const char* object_manager_path = "/org/amazzy24128/MusicInfoService";
     const char* object_path = "/org/amazzy24128/MusicInfoService/Player";
 
-    // 1. 创建一个对象管理器，路径是根路径
     g_object_manager = g_dbus_object_manager_server_new(object_manager_path);
-
-    // 2. 创建一个对象骨架，路径是子路径
     GDBusObjectSkeleton *object_skeleton = g_dbus_object_skeleton_new(object_path);
-
-    // 3. 创建我们的接口骨架
     g_player_skeleton = music_info_service_player_skeleton_new();
-
-    // 4. 将接口骨架添加到对象骨架中
     g_dbus_object_skeleton_add_interface(object_skeleton, G_DBUS_INTERFACE_SKELETON(g_player_skeleton));
-    g_object_unref(g_player_skeleton); // 对象已持有引用，我们可以释放自己的
-
-    // 5. 将完整的对象骨架导出到对象管理器
+    g_object_unref(g_player_skeleton);
     g_dbus_object_manager_server_export(g_object_manager, object_skeleton);
-    g_object_unref(object_skeleton); // 管理器已持有引用，我们可以释放自己的
-
-    // 6. 将对象管理器附加到 D-Bus 连接上
+    g_object_unref(object_skeleton);
     g_dbus_object_manager_server_set_connection(g_object_manager, connection);
     
-    // 7. 注册服务名 (与之前相同)
     g_bus_own_name(G_BUS_TYPE_SESSION, "org.amazzy24128.MusicInfoService", G_BUS_NAME_OWNER_FLAGS_NONE, nullptr, on_name_acquired, on_name_lost, loop, nullptr);
 
-    // 8. 启动后台任务 (与之前相同)
     guint mpris_sub_id = g_dbus_connection_signal_subscribe(connection, mpris_bus_name.c_str(), "org.freedesktop.DBus.Properties", "PropertiesChanged", "/org/mpris/MediaPlayer2", nullptr, G_DBUS_SIGNAL_FLAGS_NONE, on_any_signal, &context, nullptr);
     guint sync_timer_id = g_timeout_add_seconds(1, sync_position_from_dbus, &context);
     guint display_timer_id = g_timeout_add(100, predictive_update, &context);
@@ -197,7 +222,6 @@ int main()
     std::cout << "Service is running. Waiting for events..." << std::endl;
     g_main_loop_run(loop);
 
-    // --- 清理 ---
     g_source_remove(display_timer_id);
     g_source_remove(sync_timer_id);
     g_dbus_connection_signal_unsubscribe(connection, mpris_sub_id);
