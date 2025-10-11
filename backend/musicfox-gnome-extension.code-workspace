@@ -35,7 +35,13 @@
 			"mutex": "cpp",
 			"ostream": "cpp",
 			"stop_token": "cpp",
-			"typeinfo": "cpp"
+			"typeinfo": "cpp",
+			"condition_variable": "cpp",
+			"semaphore": "cpp",
+			"shared_mutex": "cpp",
+			"__mutex_base": "cpp",
+			"__threading_support": "cpp",
+			"thread": "cpp"
 		}
 	}
 }

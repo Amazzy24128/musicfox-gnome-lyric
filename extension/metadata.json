@@ -1,9 +1,0 @@
-
-{
-    "uuid": "go-musicfox-lyrics@amazzy24128.github.io",
-    "name": "Go-MusicFox Lyrics Display",
-    "description": "Display current lyrics from go-musicfox in GNOME top bar using C++ backend",
-    "version": 1,
-    "shell-version": ["40", "41", "42", "43", "44", "45", "46"],
-    "url": "https://github.com/Amazzy24128/musicfox-gnome-extension"
-}

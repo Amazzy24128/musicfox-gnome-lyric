@@ -15,3 +15,110 @@ Interface: org.freedesktop.DBus.Properties
 SignalName: PropertiesChanged
 Parameters: ('org.mpris.MediaPlayer2.Player', {'Volume': <0.40000000000000002>}, @as [])
 ========================
+
+
+
+
+
+### 开始播放的时候收到的内容
+Artist: Lia
+Title: 時を刻む唄
+Duration: 291.773 seconds
+Position: 0 seconds
+Is Playing: Yes
+Started Time: 
+Artist: Lia
+Title: 時を刻む唄
+Duration: 291.773 seconds
+Position: 0 seconds
+Is Playing: Yes
+Started Time: 
+Artist: Lia
+Title: 時を刻む唄
+Duration: 291.773 seconds
+Position: 0 seconds
+Is Playing: Yes
+Started Time: 
+
+
+### 停止播放受到的内容
+MPRIS Listener started. Waiting musicfox start...
+musicfox strated , Listening for ALL musicfox MPRIS signals...
+Artist: Lia
+Title: 時を刻む唄
+Duration: 291.773 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Lia
+Title: 時を刻む唄
+Duration: 291.773 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Lia
+Title: 時を刻む唄
+Duration: 291.773 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+
+
+
+### 切歌收到的内容
+MPRIS Listener started. Waiting musicfox start...
+musicfox strated , Listening for ALL musicfox MPRIS signals...
+Artist: m.o.v.e
+Title: Rage Your Dream
+Duration: 271.773 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: No
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: Yes
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: Yes
+Started Time: 
+Artist: Aimer
+Title: Ref:rain
+Duration: 289.986 seconds
+Position: 0 seconds
+Is Playing: Yes
+Started Time: 
