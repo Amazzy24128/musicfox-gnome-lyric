@@ -25,7 +25,7 @@ mkdir -p "$DEST_DIR"
 
 echo "📄 正在复制文件..."
 # 在复制后端可执行文件前，确保任何正在运行的同名进程已被终止，避免“文本文件忙”
-echo "🔎 检查并终止正在运行的后端进程 (music-info-service) ..."
+echo "🔎 检查并终止正在运行的后端进程 (music-in"shell-version": [ "46" ],fo-service) ..."
 
 # 尝试找到运行中的进程（匹配可执行名或路径）
 PIDS=$(pgrep -f "music-info-service" || true)
