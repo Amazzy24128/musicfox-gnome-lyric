@@ -1,6 +1,8 @@
 import St from 'gi://St';
 import Gio from 'gi://Gio';
-import GLib from 'gi://GLib'; // 1. 引入 GLib
+import GLib from 'gi://GLib';
+import Pango from 'gi://Pango'; // 新增：用于省略显示
+import Clutter from 'gi://Clutter';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -66,9 +68,17 @@ export default class MusicfoxLyricExtension extends Extension {
         
         // 创建UI元素（保持不变）
         this._indicator = new PanelMenu.Button(0.0, 'Musicfox Lyric', false);
-        this._label = new St.Label({ text: 'Loading...' });
+        this._label = new St.Label({
+            text: 'Loading...',
+            style: 'min-width: 280px; max-width: 280px; overflow: hidden; line-height: 1.2em;',
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        if (this._label.clutter_text) {
+            this._label.clutter_text.set_single_line_mode(true);
+            this._label.clutter_text.set_ellipsize(Pango.EllipsizeMode.END);
+        }
         this._indicator.add_child(this._label);
-        Main.panel.addToStatusArea(this.uuid, this._indicator, 0, 'left');
+        Main.panel.addToStatusArea(this.uuid, this._indicator, -1, 'left');
     }
 
     disable() {
@@ -163,7 +173,7 @@ export default class MusicfoxLyricExtension extends Extension {
         if (!this._label) return;
         let displayText = lyric || (artist && title ? `${artist} - ${title}` : 'Music Ready');
         if (!artist && !title && !lyric) { displayText = 'Musicfox Lyric'; }
-        const icon = isPlaying ? '❚❚' : '▶';
+        const icon = isPlaying ? '⏸' : '⏵';
         this._label.set_text(`${icon} ${displayText}`);
     }
     
