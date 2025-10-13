@@ -1,6 +1,7 @@
 # musicfox-gnome-extension
 
 一个适用于 GNOME 桌面环境的歌词扩展，支持从 [musicfox](https://github.com/anythink/musicfox) 获取当前播放的歌曲信息，并在桌面上实时显示歌词。我的第一个项目，很多不足之处，欢迎各路大佬指正QWQ！
+目前项目仅在 GNOME 46 + Ubuntu24.04LTS(x86)下测试通过，其他环境未测试，欢迎反馈。
 
 ## 安装方法
 克隆本项目至合适位置，进入项目根目录，运行：
@@ -32,7 +33,7 @@
 
 ## 依赖
 
-- GNOME Shell 3.36+
+- GNOME Shell 45–47
 - bash
 - musicfox（需提前安装并配置）
 
