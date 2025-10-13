@@ -24,6 +24,37 @@ echo "🧩 准备安装目录..."
 mkdir -p "$DEST_DIR"
 
 echo "📄 正在复制文件..."
+# 在复制后端可执行文件前，确保任何正在运行的同名进程已被终止，避免“文本文件忙”
+echo "🔎 检查并终止正在运行的后端进程 (music-info-service) ..."
+
+# 尝试找到运行中的进程（匹配可执行名或路径）
+PIDS=$(pgrep -f "music-info-service" || true)
+if [[ -n "$PIDS" ]]; then
+    echo "⚠️ 发现正在运行的后端进程，PID: $PIDS。尝试优雅终止（SIGTERM）..."
+    # 发送 SIGTERM
+    kill -TERM $PIDS 2>/dev/null || sudo kill -TERM $PIDS 2>/dev/null || true
+
+    # 等待进程退出（最多等待 5 秒）
+    for i in {1..5}; do
+        sleep 1
+        STILL=$(pgrep -f "music-info-service" || true)
+        if [[ -z "$STILL" ]]; then
+            echo "✅ 后端进程已优雅退出。"
+            break
+        fi
+    done
+
+    # 如果仍在运行，强制终止（SIGKILL）
+    STILL=$(pgrep -f "music-info-service" || true)
+    if [[ -n "$STILL" ]]; then
+        echo "❌ 后端进程未响应，强制终止（SIGKILL） PID: $STILL"
+        kill -KILL $STILL 2>/dev/null || sudo kill -KILL $STILL 2>/dev/null || true
+        sleep 1
+    fi
+else
+    echo "ℹ️ 未发现正在运行的后端进程。"
+fi
+
 # 复制前端文件
 sudo cp "$SOURCE_DIR/frontend/extension.js" "$DEST_DIR/"
 sudo cp "$SOURCE_DIR/frontend/metadata.json" "$DEST_DIR/"
