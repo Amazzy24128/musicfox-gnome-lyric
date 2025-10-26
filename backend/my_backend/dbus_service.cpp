@@ -141,7 +141,7 @@ extern "C" void on_any_signal(GDBusConnection *connection, const gchar *sender, 
 }
 
 
-// --- 新增：监听musicfox退出并重启服务 ---
+// --- 修改：监听musicfox退出，清空状态并重启服务 ---
 extern "C" void on_name_owner_changed(GDBusConnection *connection, const gchar *sender, const gchar *path, const gchar *iface_name, const gchar *signal, GVariant *params, gpointer data) {
     if (g_strcmp0(signal, "NameOwnerChanged") != 0 || !params) return;
 
@@ -150,7 +150,17 @@ extern "C" void on_name_owner_changed(GDBusConnection *connection, const gchar *
 
     // 检查name是否以"org.mpris.MediaPlayer2.musicfox"开头，且new_owner为空（退出）
     if (std::string(name).find("org.mpris.MediaPlayer2.musicfox") == 0 && g_strcmp0(new_owner, "") == 0) {
-        std::cout << "Detected musicfox exit, restarting service..." << std::endl;
+        std::cout << "Detected musicfox exit, clearing state and restarting service..." << std::endl;
+        
+        // 清空全局状态
+        g_current_music = {};
+        g_parsed_lyrics.clear();
+        g_current_lyric_text = "";
+        g_last_sync_position_us = 0;
+        
+        // 发送清空信号给前端
+        update_and_emit_signal(0);
+        
         // 获取可执行文件路径并重启
         const char* home = getenv("HOME");
         if (!home) {
