@@ -7,6 +7,7 @@
 #include <chrono>
 #include <unistd.h>
 #include <sstream> // 确保包含 sstream
+#include <cstdlib> // for getenv
 
 #include "music-info-service-generated.h"
 
@@ -140,6 +141,31 @@ extern "C" void on_any_signal(GDBusConnection *connection, const gchar *sender, 
 }
 
 
+// --- 新增：监听musicfox退出并重启服务 ---
+extern "C" void on_name_owner_changed(GDBusConnection *connection, const gchar *sender, const gchar *path, const gchar *iface_name, const gchar *signal, GVariant *params, gpointer data) {
+    if (g_strcmp0(signal, "NameOwnerChanged") != 0 || !params) return;
+
+    const gchar *name, *old_owner, *new_owner;
+    g_variant_get(params, "(&s&s&s)", &name, &old_owner, &new_owner);
+
+    // 检查name是否以"org.mpris.MediaPlayer2.musicfox"开头，且new_owner为空（退出）
+    if (std::string(name).find("org.mpris.MediaPlayer2.musicfox") == 0 && g_strcmp0(new_owner, "") == 0) {
+        std::cout << "Detected musicfox exit, restarting service..." << std::endl;
+        // 获取可执行文件路径并重启
+        const char* home = getenv("HOME");
+        if (!home) {
+            std::cerr << "Failed to get HOME environment variable." << std::endl;
+            return;
+        }
+        std::string exe_path = std::string(home) + "/.local/share/gnome-shell/extensions/musicfox-lyric@amazzy24128/music-info-service";
+        // 使用execl重启进程
+        execl(exe_path.c_str(), exe_path.c_str(), nullptr);
+        // 如果execl失败，打印错误
+        perror("execl failed");
+    }
+}
+
+
 static gboolean sync_position_from_dbus(gpointer user_data) {
     AppContext* context = static_cast<AppContext*>(user_data);
     GError *error = nullptr;
@@ -184,6 +210,9 @@ static void on_name_lost(GDBusConnection *connection, const gchar *name, gpointe
 
 int main()
 {
+
+
+
     std::cout << "Starting Music Info D-Bus Service..." << std::endl;
     std::string mpris_bus_name = "";
     while (mpris_bus_name.empty()) {
@@ -214,6 +243,8 @@ int main()
     g_bus_own_name(G_BUS_TYPE_SESSION, "org.amazzy24128.MusicInfoService", G_BUS_NAME_OWNER_FLAGS_NONE, nullptr, on_name_acquired, on_name_lost, loop, nullptr);
 
     guint mpris_sub_id = g_dbus_connection_signal_subscribe(connection, mpris_bus_name.c_str(), "org.freedesktop.DBus.Properties", "PropertiesChanged", "/org/mpris/MediaPlayer2", nullptr, G_DBUS_SIGNAL_FLAGS_NONE, on_any_signal, &context, nullptr);
+    // 新增：订阅NameOwnerChanged信号以监听musicfox退出
+    guint exit_sub_id = g_dbus_connection_signal_subscribe(connection, "org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged", "/org/freedesktop/DBus", nullptr, G_DBUS_SIGNAL_FLAGS_NONE, on_name_owner_changed, nullptr, nullptr);
     guint sync_timer_id = g_timeout_add_seconds(1, sync_position_from_dbus, &context);
     guint display_timer_id = g_timeout_add(100, predictive_update, &context);
 
@@ -225,6 +256,8 @@ int main()
     g_source_remove(display_timer_id);
     g_source_remove(sync_timer_id);
     g_dbus_connection_signal_unsubscribe(connection, mpris_sub_id);
+    // 新增：取消退出监听订阅
+    g_dbus_connection_signal_unsubscribe(connection, exit_sub_id);
     g_main_loop_unref(loop);
     g_object_unref(g_object_manager);
     g_object_unref(connection);

@@ -1,8 +1,4 @@
-#include <iostream>
-#include <gio/gio.h>
-#include <string>
-#include <unistd.h>
-
+#include <dbus_exit_listener.h>
 // 查找musicfox的D-Bus总线名称（简化版）
 std::string find_musicfox_bus_name() {
     GError *error = nullptr;
@@ -37,7 +33,9 @@ extern "C" void on_name_owner_changed(GDBusConnection *connection, const gchar *
     }
 }
 
-int main() {
+
+auto dbus_listen_thr()
+{
     std::cout << "Starting D-Bus Exit Listener for musicfox..." << std::endl;
 
     std::string mpris_bus_name = "";
@@ -82,5 +80,56 @@ int main() {
     g_object_unref(connection);
 
     std::cout << "Listener stopped." << std::endl;
+
+
     return 0;
 }
+
+
+// int main() {
+//     std::cout << "Starting D-Bus Exit Listener for musicfox..." << std::endl;
+
+//     std::string mpris_bus_name = "";
+//     while (mpris_bus_name.empty()) {
+//         mpris_bus_name = find_musicfox_bus_name();
+//         if (mpris_bus_name.empty()) {
+//             std::cout << "Waiting for musicfox to appear on D-Bus..." << std::endl;
+//             struct timespec ts = {0, 500000000L}; nanosleep(&ts, nullptr);
+//         }
+//     }
+//     std::cout << "Found musicfox at: " << mpris_bus_name << std::endl;
+
+//     GError *error = nullptr;
+//     GDBusConnection *connection = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+//     if (!connection) {
+//         std::cerr << "Failed to get session bus." << std::endl;
+//         return 1;
+//     }
+
+//     GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
+
+//     // 订阅NameOwnerChanged信号以监听musicfox退出
+//     guint sub_id = g_dbus_connection_signal_subscribe(
+//         connection,
+//         "org.freedesktop.DBus",  // 发送者
+//         "org.freedesktop.DBus",  // 接口
+//         "NameOwnerChanged",     // 信号
+//         "/org/freedesktop/DBus", // 路径
+//         nullptr,                 // 无过滤（订阅所有NameOwnerChanged）
+//         G_DBUS_SIGNAL_FLAGS_NONE,
+//         on_name_owner_changed,
+//         loop,
+//         nullptr
+//     );
+
+//     std::cout << "Listening for musicfox exit. Close musicfox to test..." << std::endl;
+//     g_main_loop_run(loop);  // 运行循环，直到检测到退出
+
+//     // 清理
+//     g_dbus_connection_signal_unsubscribe(connection, sub_id);
+//     g_main_loop_unref(loop);
+//     g_object_unref(connection);
+
+//     std::cout << "Listener stopped." << std::endl;
+//     return 0;
+// }
